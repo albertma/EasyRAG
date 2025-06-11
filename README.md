@@ -1,0 +1,2 @@
+# EasyRAG
+A easy RAG
