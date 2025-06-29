@@ -62,7 +62,6 @@ class LLMInstanceLLMModel(models.Model):
     llm_object_id = models.CharField(max_length=128, null=False)
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
     model_status = models.CharField(max_length=50, default='ACTIVE')
-    instance_config = models.JSONField(null=False, blank=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -78,6 +77,7 @@ class LLMModelUserConfig(models.Model):
     config_type = models.CharField(max_length=128, null=False)
     config_value = models.CharField(max_length=128, null=False)
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    instance_config = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

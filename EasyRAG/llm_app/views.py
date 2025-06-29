@@ -3,10 +3,12 @@ from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from .models import LLMInstanceLLMModel, LLMModelUserConfig, LLMTemplate, LLMInstance
 from .serializers import LLMInstanceLLMModelSerializer, LLMModelUserConfigSerializer, LLMTemplateSerializer, LLMInstanceSerializer
-from .viewmodel import LLMInstanceViewModel, LLMModelUserConfigViewModel
+from .viewmodel import LLMInstanceViewModel, LLMModelUserConfigViewModel, LLMInstanceLLMModelViewModel
 import logging
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+from django.contrib.auth.models import User
+
 logger = logging.getLogger(__name__)
 
 class LLMInstancePagination(PageNumberPagination):
@@ -231,6 +233,8 @@ class LLMInstanceLLMModelViewSet(viewsets.ModelViewSet):
     serializer_class = LLMInstanceLLMModelSerializer
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ['get']
+    pagination_class = None  # 禁用分页
+    llm_instance_llm_model_view_model = LLMInstanceLLMModelViewModel()
     
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
@@ -238,15 +242,57 @@ class LLMInstanceLLMModelViewSet(viewsets.ModelViewSet):
         return LLMInstanceLLMModel.objects.filter(owner=self.request.user)
     
     @swagger_auto_schema(
-        operation_description="获取 LLM 模型列表",
-        operation_summary="获取 LLM 模型列表",
+        operation_description="获取用户的所有LLM模型数据，按instance_id分类",
+        operation_summary="获取用户LLM模型数据",
+        manual_parameters=[
+            openapi.Parameter(
+                'user_id',
+                openapi.IN_QUERY,
+                description='用户ID（仅超级用户可用，不传则获取当前用户数据）',
+                required=False,
+                type=openapi.TYPE_INTEGER
+            ),
+            openapi.Parameter(
+                'group_by_instance',
+                openapi.IN_QUERY,
+                description='是否按instance_id分组（默认true）',
+                required=False,
+                type=openapi.TYPE_BOOLEAN
+            )
+        ],
         tags=['LLM 模型管理'],
         responses={200: LLMInstanceLLMModelSerializer(many=True)}
     )
     def list(self, request, *args, **kwargs):
         if getattr(self, 'swagger_fake_view', False):
             return Response([], status=200)
-        return super().list(request, *args, **kwargs)
+        
+        # 获取查询参数
+        user_id = request.query_params.get('user_id')
+        group_by_instance = request.query_params.get('group_by_instance', 'true').lower() == 'true'
+        
+        # 确定要查询的用户
+        target_user = None
+        if user_id:
+            # 只有超级用户可以查询其他用户的数据
+            if not request.user.is_superuser:
+                return Response(
+                    {'error': 'Only superusers can query other users data'}, 
+                    status=403
+                )
+            try:
+                target_user = User.objects.get(id=int(user_id))
+            except (ValueError, User.DoesNotExist):
+                return Response({'error': 'Invalid user_id'}, status=400)
+        
+        # 委托给viewmodel处理
+        result = self.llm_instance_llm_model_view_model.get_user_llm_models(
+            user=request.user,
+            target_user=target_user,
+            group_by_instance=group_by_instance
+        )
+        
+        return Response(result)
 
 class LLMModelUserConfigViewSet(viewsets.ModelViewSet):
     serializer_class = LLMModelUserConfigSerializer
@@ -254,27 +300,89 @@ class LLMModelUserConfigViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'delete']
     user_config_view_model = LLMModelUserConfigViewModel()
 
-    def get_queryset(self):
-        if getattr(self, 'swagger_fake_view', False):
-            return LLMModelUserConfig.objects.none()
-        return LLMModelUserConfig.objects.filter(owner=self.request.user)
+    
     
     @swagger_auto_schema(
         operation_description="获取 LLM 模型用户配置列表",
         operation_summary="获取 LLM 模型用户配置列表",
         tags=['LLM 模型用户配置管理'],
-        responses={200: LLMModelUserConfigSerializer(many=True)}
+        responses={
+            200: openapi.Response(
+                description="用户配置列表",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'llm_model_user_config_id': openapi.Schema(
+                                type=openapi.TYPE_STRING,
+                                description='配置ID'
+                            ),
+                            'config_type': openapi.Schema(
+                                type=openapi.TYPE_STRING,
+                                description='配置类型'
+                            ),
+                            'config_value': openapi.Schema(
+                                type=openapi.TYPE_STRING,
+                                description='配置值'
+                            )
+                           
+                        }
+                    )
+                )
+            )
+        }
     )
     def list(self, request, *args, **kwargs):
         if getattr(self, 'swagger_fake_view', False):
             return Response([], status=200)
-        serializer = self.get_serializer(self.get_queryset(), many=True)
-        return Response(serializer.data)
+        llm_model_user_configs = LLMModelUserConfig.objects.filter(owner=self.request.user)
+        configure_list = []
+        for llm_model_user_config in llm_model_user_configs:
+            configure_list.append({
+                'llm_model_user_config_id': llm_model_user_config.llm_model_user_config_id,
+                'config_type': llm_model_user_config.config_type,
+                'config_value': llm_model_user_config.config_value,
+                'instance_config': llm_model_user_config.instance_config
+            })
+        return Response(configure_list)
     
     @swagger_auto_schema(
         operation_description="创建新的 LLM 模型用户配置",
         operation_summary="创建 LLM 模型用户配置",
-        request_body=LLMModelUserConfigSerializer,
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'configure_list': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    description='配置列表',
+                    items=openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'llm_instance_id': openapi.Schema(
+                                type=openapi.TYPE_STRING,
+                                description='LLM实例ID'
+                            ),
+                            'llm_model_id': openapi.Schema(
+                                type=openapi.TYPE_STRING,
+                                description='LLM模型ID'
+                            ),
+                            'config_type': openapi.Schema(
+                                type=openapi.TYPE_STRING,
+                                description='配置类型（CHAT/EMBEDDING/RERANK/IMG_TO_TEXT/SPEECH_TO_TEXT）',
+                                enum=['CHAT', 'EMBEDDING', 'RERANK', 'IMG_TO_TEXT', 'SPEECH_TO_TEXT']
+                            ),
+                            'config_value': openapi.Schema(
+                                type=openapi.TYPE_STRING,
+                                description='配置值（如模型名称）'
+                            )
+                        },
+                        required=['llm_instance_id', 'llm_model_id', 'config_type', 'config_value']
+                    )
+                )
+            },
+            required=['configure_list']
+        ),
         responses={201: LLMModelUserConfigSerializer},
         tags=['LLM 模型用户配置管理']
     )
@@ -287,14 +395,14 @@ class LLMModelUserConfigViewSet(viewsets.ModelViewSet):
         """执行用户配置创建，委托给viewmodel处理"""
         logger.info(f"In view perform_create, delegating to viewmodel")
         try:
-            llm_instance = LLMInstance.objects.get(llm_instance_id=serializer.validated_data.get('llm_instance_id'))
-            if llm_instance.created_by != self.request.user:
-                raise serializers.ValidationError("You do not have permission to create user config for this instance")
-            llm_model_id = serializer.validated_data.get('llm_model_id')
+            # 获取配置列表
+            configure_list = serializer.validated_data.get('configure_list')
             
-            return self.user_config_view_model.perform_create_after_delete(llm_instance, llm_model_id, self.request.user)
-        except LLMInstance.DoesNotExist:
-            raise serializers.ValidationError("LLM instance not found")
+            # 委托给viewmodel处理
+            return self.user_config_view_model.perform_create_after_delete(configure_list, self.request.user)
+        except Exception as e:
+            logger.error(f"Error in perform_create: {e}")
+            raise serializers.ValidationError(f"Error in perform_create: {e}")
 
     @swagger_auto_schema(
         operation_description="删除 LLM 模型用户配置",

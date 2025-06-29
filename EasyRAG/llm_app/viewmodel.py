@@ -139,43 +139,159 @@ class LLMInstanceViewModel:
                 llm_model_id=llm_model,
                 llm_object_id="model",
                 owner=llm_instance.created_by,
-                instance_config=llm_instance.llm_config,
                 model_status='ACTIVE'
             )
             instance_llm_model.save()
         
         return True
+
+class LLMInstanceLLMModelViewModel:
+    """LLM实例LLM模型视图模型"""
     
+    def get_user_llm_models(self, user: User, target_user: User = None, group_by_instance: bool = True) -> dict:
+        """获取用户的LLM模型数据，可选择按instance_id分组"""
+        logger.info(f"In get_user_llm_models, user: {user.username}, target_user: {target_user.username if target_user else 'None'}, group_by_instance: {group_by_instance}")
+        
+        # 确定要查询的用户
+        if target_user is None:
+            target_user = user
+        
+        # 获取该用户的所有LLM模型数据
+        queryset = LLMInstanceLLMModel.objects.filter(owner=target_user)
+        
+        if group_by_instance:
+            # 按instance_id分组
+            from collections import defaultdict
+            
+            # 获取所有数据
+            llm_models = list(queryset.select_related('llm_instance', 'llm_instance__llm_template'))
+            
+            # 按instance_id分组
+            grouped_data = defaultdict(list)
+            for model in llm_models:
+                instance_id = model.llm_instance.llm_instance_id
+                grouped_data[instance_id].append({
+                    'llm_instance_llm_model_id': model.llm_instance_llm_model_id,
+                    'llm_model_id': model.llm_model_id,
+                    'llm_object_id': model.llm_object_id,
+                    'model_status': model.model_status,
+                    'created_at': model.created_at,
+                    'updated_at': model.updated_at,
+                    'instance_info': {
+                        'llm_instance_id': model.llm_instance.llm_instance_id,
+                        'llm_template_name': model.llm_instance.llm_template.template_name,
+                        'llm_status': model.llm_instance.llm_status,
+                        'created_at': model.llm_instance.created_at
+                    }
+                })
+            
+            # 转换为列表格式
+            result = []
+            for instance_id, models in grouped_data.items():
+                result.append({
+                    'instance_id': instance_id,
+                    'models': models,
+                    'model_count': len(models)
+                })
+            
+            return {
+                'user_id': target_user.id,
+                'username': target_user.username,
+                'grouped_by_instance': True,
+                'data': result,
+                'total_instances': len(result),
+                'total_models': sum(item['model_count'] for item in result)
+            }
+        else:
+            # 不分组，直接返回所有数据
+            from EasyRAG.llm_app.serializers import LLMInstanceLLMModelSerializer
+            
+            # 创建序列化器
+            serializer = LLMInstanceLLMModelSerializer(queryset, many=True)
+            
+            return {
+                'user_id': target_user.id,
+                'username': target_user.username,
+                'grouped_by_instance': False,
+                'data': serializer.data,
+                'total_models': len(serializer.data)
+            }
 
 class LLMModelUserConfigViewModel:
     """LLM模型用户配置视图模型"""
 
-    def perform_create_after_delete(self, llm_instance:LLMInstance, llm_model_id:str, user:User)->bool:
+    def perform_create_after_delete(self, configure_list: List[dict], user: User) -> bool:
         """配置用户模型"""
-        logger.info(f"In config_user_llm_model, llm_instance: {llm_instance}, llm_model_id: {llm_model_id}")
+        logger.info(f"In config_user_llm_model, configure_list: {configure_list}")
         
         # 验证配置类型和权限
-        try:
-            instance_llm_model = LLMInstanceLLMModel.objects.get(llm_instance=llm_instance, llm_model_id=llm_model_id)
-            if instance_llm_model.owner != user:
-                logger.error(f"instance_llm_model.owner: {instance_llm_model.owner}, user: {user}")
-                raise serializers.ValidationError(f"You do not have permission to create user config for this instance")
-        except LLMInstanceLLMModel.DoesNotExist:
-            logger.error(f"LLM model not found: {llm_model_id}")
-            raise serializers.ValidationError(f"LLM model not found: {llm_model_id}")
+        for config in configure_list:
+            llm_instance_id = config.get('llm_instance_id')
+            llm_model_id = config.get('llm_model_id')
+            config_type = config.get('config_type')
+            config_value = config.get('config_value')
+            
+            # 验证配置类型
+            if config_type not in [LLM_CHAT_MODEL_TYPE, 
+                                   LLM_EMBEDDING_MODEL_TYPE, 
+                                   LLM_RERANK_MODEL_TYPE, 
+                                   LLM_IMG_TO_TEXT_MODEL_TYPE, 
+                                   LLM_SPEECH_TO_TEXT_MODEL_TYPE]:
+                raise serializers.ValidationError(f"Invalid config type: {config_type}")
+            
+            # 验证实例权限
+            try:
+                llm_instance = LLMInstance.objects.get(llm_instance_id=llm_instance_id)
+                if llm_instance.created_by != user:
+                    logger.error(f"llm_instance.created_by: {llm_instance.created_by}, user: {user}")
+                    raise serializers.ValidationError(f"You do not have permission to create user config for this instance")
+            except LLMInstance.DoesNotExist:
+                logger.error(f"LLM instance not found: {llm_instance_id}")
+                raise serializers.ValidationError(f"LLM instance not found: {llm_instance_id}")
+            
+            # 验证模型是否存在
+            try:
+                instance_llm_model = LLMInstanceLLMModel.objects.get(
+                    llm_instance=llm_instance, 
+                    llm_instance_llm_model_id=llm_model_id
+                )
+                logger.info(f"Found instance_llm_model: {instance_llm_model}")
+                if instance_llm_model.owner != user:
+                    logger.error(f"instance_llm_model.owner: {instance_llm_model.owner}, user: {user}")
+                    raise serializers.ValidationError(f"You do not have permission to create user config for this instance")
+            except LLMInstanceLLMModel.DoesNotExist:
+                logger.error(f"LLM model not found: {llm_model_id}, llm_instance: {llm_instance_id}")
+                raise serializers.ValidationError(f"LLM model not found: {llm_model_id}, llm_instance: {llm_instance_id}")
 
         try:
             with transaction.atomic():
                 # 删除现有配置
-                LLMModelUserConfig.objects.filter(owner=user).delete()
+                LLMModelUserConfig.objects.filter(owner=user, config_type=config_type).delete()
                 
                 # 创建新配置
-                user_config = LLMModelUserConfig.objects.create(
-                    llm_instance_llm_model=instance_llm_model,
-                    config_type='CHAT',  # 默认配置类型
-                    config_value=llm_model_id,
-                    owner=user)
-                user_config.save()
+                for config in configure_list:
+                    llm_instance_id = config.get('llm_instance_id')
+                    llm_model_id = config.get('llm_model_id')
+                    config_type = config.get('config_type')
+                    config_value = config.get('config_value')
+                    
+                    # 获取实例和模型
+                    llm_instance = LLMInstance.objects.get(llm_instance_id=llm_instance_id)
+                    instance_llm_model = LLMInstanceLLMModel.objects.get(
+                        llm_instance=llm_instance, 
+                        llm_instance_llm_model_id=llm_model_id
+                    )
+                    
+                    user_config = LLMModelUserConfig.objects.create(
+                        llm_model_user_config_id=generate_uuid(),
+                        llm_instance_llm_model=instance_llm_model,
+                        config_type=config_type,
+                        config_value=config_value,
+                        instance_config=instance_llm_model.instance_config,
+                        owner=user)
+                    user_config.save()
+                    logger.info(f"Created user config: {user_config.llm_model_user_config_id}")
+                
                 return True
         except Exception as e:
             logger.error(f"LLM model user config creation failed: {e}")

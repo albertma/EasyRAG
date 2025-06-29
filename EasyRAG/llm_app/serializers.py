@@ -65,29 +65,24 @@ class LLMInstanceLLMModelSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['llm_instance_llm_model_id','created_at', 'updated_at']
 
+
 class LLMModelUserConfigSerializer(serializers.ModelSerializer):
-    llm_instance_id = serializers.CharField(required=True)
-    llm_model_id = serializers.CharField(required=True)
+    configure_list = serializers.ListField(
+        child=serializers.DictField(),
+        required=True
+    )
     
     class Meta:
         model = LLMModelUserConfig
         fields = [
-            'llm_model_user_config_id',
-            'llm_instance_id',
-            'llm_model_id',
-            'config_type',
-            'config_value',
-            'created_at',
-            'updated_at'
+            'configure_list',
         ]
-        read_only_fields = ['llm_model_user_config_id', 'created_at', 'updated_at']
     
     def create(self, validated_data):
         logger.info(f"In Serializer create llm_model_user_config, validated_data: {validated_data}")
         # 这个序列化器主要用于接收数据，实际的创建逻辑在viewmodel中处理
         # 这里只设置基本字段
         validated_data['owner'] = self.context['request'].user
-        validated_data['llm_model_user_config_id'] = generate_uuid()
         
         # 注意：这里不会真正创建对象，因为实际的创建逻辑在viewmodel中
         # 这里只是为了满足序列化器的要求
