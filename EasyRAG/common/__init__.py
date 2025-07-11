@@ -1,7 +1,7 @@
 # 初始化 RAG 组件工厂
 def init_rag_components():
     """初始化 RAG 组件工厂"""
-    from .rag_comp_factory import RAGComponentFactory
+    from ..rag_service.rag_comp_factory import RAGComponentFactory
     from EasyRAG import settings
     
     # 从 settings 获取配置

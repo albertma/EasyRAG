@@ -1,19 +1,17 @@
 from typing import Dict, Any, List, Optional, Callable
 import logging
 
-from common.rag_comp_factory import RAGComponentFactory
-from common.rag_tokenizer import RagTokenizer
-from file_parser.document_parser import DocumentParser
-from file_parser.workflow import MinerUWorkflow
-from rag_app.models import Document
+from EasyRAG.rag_service.rag_comp_factory import RAGComponentFactory
+from EasyRAG.common.rag_tokenizer import RagTokenizer
+from EasyRAG.file_parser.document_parser import DocumentParser
+from EasyRAG.file_parser.workflow import MinerUWorkflow
 
 tknzr = RagTokenizer()
 
 class MinerUDocumentParser(DocumentParser):
-    def __init__(self, file_path: str):
-        self.file_path = file_path
+    def __init__(self):
         self.file_storage = RAGComponentFactory.instance().get_default_file_storage()
-        self.workflow = MinerUWorkflow()
+        
         
 
     def _tokenize_text(self, text: str) -> List[str]:
@@ -28,6 +26,9 @@ class MinerUDocumentParser(DocumentParser):
                                 process_duration=None):
         """更新数据库中文档的进度和状态"""
         try:
+            # 延迟导入，避免循环依赖
+            from EasyRAG.rag_app.models import Document
+            
             update_fields = {}
             
             if progress is not None:

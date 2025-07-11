@@ -7,11 +7,11 @@ class DocumentParser(ABC):
         pass
     
     @abstractmethod
-    def parse(self, doc_id: str, 
+    def parse(self,
               doc_info: Dict[str, Any], 
               file_info: Dict[str, Any], 
-              embedding_config: Dict[str, Any],
-              kb_info: Dict[str, Any],
+              knowledge_base_info: Dict[str, Any],
+              config: Dict[str, Any],
               callback: Optional[Callable] = None,
               resume_from: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -21,8 +21,7 @@ class DocumentParser(ABC):
             doc_id: 文档ID
             doc_info: 文档信息
             file_info: 文件信息
-            embedding_config: 嵌入配置
-            kb_info: 知识库信息
+            config: 配置
             callback: 状态更新回调函数，接收doc_id和update_fields参数
             resume_from: 断点续传的起始步骤
             

@@ -237,7 +237,7 @@ REDIS_CONFIG = {
     "host": os.getenv('REDIS_HOST', 'localhost'),
     "port": int(os.getenv('REDIS_PORT', '6379')),
     "db": int(os.getenv('REDIS_DB', '0')),
-    "username": os.getenv('REDIS_USERNAME', 'rag_flow'),
+    "username": os.getenv('REDIS_USERNAME', ''),  # 明确设置为空字符串，表示不使用用户名
     "password": os.getenv('REDIS_PASSWORD', 'infini_rag_flow'),
     "cluster_mode": os.getenv('REDIS_CLUSTER_MODE', 'false').lower() == 'true',
     "cluster_nodes": os.getenv('REDIS_CLUSTER_NODES', '').split(',') if os.getenv('REDIS_CLUSTER_NODES') else None,
@@ -251,6 +251,50 @@ REDIS_CONFIG = {
 VECTOR_DATABASE_TYPE = os.getenv('VECTOR_DATABASE_TYPE', 'elasticsearch')
 FILE_STORAGE_TYPE = os.getenv('FILE_STORAGE_TYPE', 'minio')
 FILE_PARSER_TYPE = os.getenv('FILE_PARSER_TYPE', 'mineru')
+
+# Celery 配置
+# 构建带认证的 Redis URL
+if REDIS_CONFIG.get('username') and REDIS_CONFIG.get('password'):
+    CELERY_BROKER_URL = f"redis://{REDIS_CONFIG['username']}:{REDIS_CONFIG['password']}@{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/{REDIS_CONFIG['db']}"
+    CELERY_RESULT_BACKEND = f"redis://{REDIS_CONFIG['username']}:{REDIS_CONFIG['password']}@{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/{REDIS_CONFIG['db']}"
+elif REDIS_CONFIG.get('password'):
+    # 只有密码，没有用户名
+    CELERY_BROKER_URL = f"redis://:{REDIS_CONFIG['password']}@{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/{REDIS_CONFIG['db']}"
+    CELERY_RESULT_BACKEND = f"redis://:{REDIS_CONFIG['password']}@{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/{REDIS_CONFIG['db']}"
+else:
+    CELERY_BROKER_URL = f"redis://{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/{REDIS_CONFIG['db']}"
+    CELERY_RESULT_BACKEND = f"redis://{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/{REDIS_CONFIG['db']}"
+
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'Asia/Shanghai'
+CELERY_ENABLE_UTC = True
+
+# Celery 任务路由
+CELERY_TASK_ROUTES = {
+    'EasyRAG.tasks.*': {'queue': 'rag_tasks'},
+    'EasyRAG.tasks.document_parsing.*': {'queue': 'document_parsing'},
+    'EasyRAG.tasks.workflow.*': {'queue': 'workflow_tasks'},
+}
+
+# Celery 任务执行配置
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_RESULT_EXPIRES = 3600
+
+# Celery 任务重试配置
+CELERY_TASK_ANNOTATIONS = {
+    '*': {
+        'retry_backoff': True,
+        'retry_backoff_max': 600,
+        'max_retries': 3,
+    }
+}
+
+# Celery 工作流配置
+CELERY_TASK_ALWAYS_EAGER = False
+CELERY_TASK_EAGER_PROPAGATES = True
 
 # 日志配置
 LOGGING = {

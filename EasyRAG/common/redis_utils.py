@@ -4,8 +4,8 @@ import pickle
 import logging
 from typing import Any, Optional, Union, Dict, List
 from datetime import timedelta
-import hashlib
 import os
+from EasyRAG import settings
 
 logger = logging.getLogger(__name__)
 
@@ -14,14 +14,14 @@ class RedisUtils:
     """Redis 工具类，兼容 Redis Cluster 和 Redis 单例模式"""
     
     def __init__(self, host: str = 'localhost', port: int = 6379, db: int = 0, 
-                 password: Optional[str] = None, cluster_mode: bool = False,
-                 cluster_nodes: Optional[List[str]] = None, **kwargs):
+                 password: Optional[str] = None, username: Optional[str] = None,
+                 cluster_mode: bool = False, cluster_nodes: Optional[List[str]] = None, **kwargs):
         """初始化 Redis 连接"""
         try:
             if cluster_mode:
-                self._init_cluster_mode(cluster_nodes, password, **kwargs)
+                self._init_cluster_mode(cluster_nodes, password, username, **kwargs)
             else:
-                self._init_single_mode(host, port, db, password, **kwargs)
+                self._init_single_mode(host, port, db, password, username, **kwargs)
             
             self.redis_client.ping()
             mode = "集群" if cluster_mode else "单例"
@@ -31,7 +31,8 @@ class RedisUtils:
             logger.error(f"Redis 连接失败: {e}")
             raise
     
-    def _init_cluster_mode(self, cluster_nodes: List[str], password: Optional[str], **kwargs):
+    def _init_cluster_mode(self, cluster_nodes: List[str], password: Optional[str], 
+                          username: Optional[str] = None, **kwargs):
         """初始化集群模式"""
         if not cluster_nodes:
             raise ValueError("集群模式需要提供 cluster_nodes 参数")
@@ -47,18 +48,21 @@ class RedisUtils:
         self.redis_client = redis.RedisCluster(
             startup_nodes=startup_nodes,
             password=password,
+            username=username,
             decode_responses=True,
             **kwargs
         )
         self.cluster_mode = True
     
-    def _init_single_mode(self, host: str, port: int, db: int, password: Optional[str], **kwargs):
+    def _init_single_mode(self, host: str, port: int, db: int, password: Optional[str], 
+                        username: Optional[str] = None, **kwargs):
         """初始化单例模式"""
         self.redis_client = redis.Redis(
             host=host,
             port=port,
             db=db,
             password=password,
+            username=username,
             decode_responses=True,
             **kwargs
         )
@@ -209,31 +213,33 @@ _redis_instance = None
 
 
 def get_redis_instance(host: str = None, port: int = None, db: int = None, 
-                      password: str = None, cluster_mode: bool = None,
+                      password: str = None, username: str = None, cluster_mode: bool = None,
                       cluster_nodes: List[str] = None, **kwargs) -> RedisUtils:
     """获取全局 Redis 实例"""
     global _redis_instance
     
     if cluster_mode is None:
-        cluster_mode = os.getenv('REDIS_CLUSTER_MODE', 'false').lower() == 'true'
+        cluster_mode = settings.REDIS_CONFIG['cluster_mode']
     
     if cluster_mode:
         if cluster_nodes is None:
-            cluster_nodes_str = os.getenv('REDIS_CLUSTER_NODES', '')
+            cluster_nodes_str = settings.REDIS_CONFIG['cluster_nodes']
             cluster_nodes = [node.strip() for node in cluster_nodes_str.split(',') if node.strip()]
         
         if not cluster_nodes:
             raise ValueError("集群模式需要提供 cluster_nodes 参数或设置 REDIS_CLUSTER_NODES 环境变量")
     else:
         if host is None:
-            host = os.getenv('REDIS_HOST', 'localhost')
+            host = settings.REDIS_CONFIG['host']
         if port is None:
-            port = int(os.getenv('REDIS_PORT', '6379'))
+            port = settings.REDIS_CONFIG['port']
         if db is None:
-            db = int(os.getenv('REDIS_DB', '0'))
+            db = settings.REDIS_CONFIG['db']
     
     if password is None:
-        password = os.getenv('REDIS_PASSWORD')
+        password = settings.REDIS_CONFIG['password']
+    if username is None:
+        username = settings.REDIS_CONFIG.get('username')
     
     if _redis_instance is None:
         if cluster_mode:
@@ -241,6 +247,7 @@ def get_redis_instance(host: str = None, port: int = None, db: int = None,
                 cluster_mode=True,
                 cluster_nodes=cluster_nodes,
                 password=password,
+                username=username,
                 **kwargs
             )
         else:
@@ -249,6 +256,7 @@ def get_redis_instance(host: str = None, port: int = None, db: int = None,
                 port=port,
                 db=db,
                 password=password,
+                username=username,
                 **kwargs
             )
     

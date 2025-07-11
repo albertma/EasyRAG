@@ -10,4 +10,8 @@ numpy==1.24.3
 pandas==2.0.3
 hanziconv==0.3.2
 nltk==3.8.1
-datrie==0.8.2 
+datrie==0.8.2
+celery==5.3.4
+redis==5.0.1
+flower==2.0.1 
+magic-pdf

@@ -7,16 +7,12 @@ from django.db import transaction
 import openai.cli
 
 from EasyRAG.llm_app.models import LLMInstance, LLMInstanceLLMModel, LLMModelUserConfig, LLMTemplate
+from EasyRAG.common.rag_model import LLM_CHAT_MODEL_TYPE, LLM_EMBEDDING_MODEL_TYPE, LLM_IMG_TO_TEXT_MODEL_TYPE, LLM_RERANK_MODEL_TYPE, LLM_SPEECH_TO_TEXT_MODEL_TYPE
 from EasyRAG.user_app.models import User
 from EasyRAG.common.utils import generate_uuid
 
 logger = logging.getLogger(__name__)
-#define valid model types
-LLM_CHAT_MODEL_TYPE = 'CHAT'
-LLM_EMBEDDING_MODEL_TYPE = 'EMBEDDING'
-LLM_RERANK_MODEL_TYPE = 'RERANK'
-LLM_IMG_TO_TEXT_MODEL_TYPE = 'IMG_TO_TEXT'
-LLM_SPEECH_TO_TEXT_MODEL_TYPE = 'SPEECH_TO_TEXT'
+
 
 class LLMInstanceViewModel:
     """LLM实例视图模型"""
@@ -237,6 +233,7 @@ class LLMModelUserConfigViewModel:
                                    LLM_RERANK_MODEL_TYPE, 
                                    LLM_IMG_TO_TEXT_MODEL_TYPE, 
                                    LLM_SPEECH_TO_TEXT_MODEL_TYPE]:
+                logger.error(f"Invalid config type: {config_type}")
                 raise serializers.ValidationError(f"Invalid config type: {config_type}")
             
             # 验证实例权限
@@ -266,8 +263,7 @@ class LLMModelUserConfigViewModel:
         try:
             with transaction.atomic():
                 # 删除现有配置
-                LLMModelUserConfig.objects.filter(owner=user, config_type=config_type).delete()
-                
+                LLMModelUserConfig.objects.filter(owner=user, config_type=config_type).delete() 
                 # 创建新配置
                 for config in configure_list:
                     llm_instance_id = config.get('llm_instance_id')
@@ -283,14 +279,14 @@ class LLMModelUserConfigViewModel:
                     )
                     
                     user_config = LLMModelUserConfig.objects.create(
-                        llm_model_user_config_id=generate_uuid(),
+                        llm_model_user_config_id = generate_uuid(),
                         llm_instance_llm_model=instance_llm_model,
                         config_type=config_type,
                         config_value=config_value,
                         instance_config=instance_llm_model.instance_config,
                         owner=user)
                     user_config.save()
-                    logger.info(f"Created user config: {user_config.llm_model_user_config_id}")
+                    logger.info(f"Created user config: {user_config.config_type}, value: {user_config.config_value}")
                 
                 return True
         except Exception as e:

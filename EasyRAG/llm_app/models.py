@@ -1,26 +1,28 @@
 from django.db import models
 
 from EasyRAG.user_app.models import User
-default_template_config = """[
+
+def default_template_config():
+    return [
        {
          "key": "supplier",
          "type": "string",
          "description": "The supplier to use",
-         "required": true
+         "required": True
        },
        {
          "key": "url",
          "type": "string",
          "description": "The url to use",
-         "required": true
+         "required": True
        },
        {
          "key": "api_key",
          "type": "string",
          "description": "The api key to use",
-         "required": false
+         "required": False
        }
-     ]"""
+     ]
 
 
 

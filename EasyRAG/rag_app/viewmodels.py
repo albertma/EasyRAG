@@ -1,18 +1,26 @@
+from enum import Enum
 from typing import List, Dict, Any, Optional, Tuple
 from django.db import transaction
 from django.utils import timezone
-from django.core.exceptions import ValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 import uuid
 import logging
 
 from EasyRAG.common import file_utils
-from EasyRAG.common.rag_comp_factory import RAGComponentFactory
+from EasyRAG.rag_service.rag_comp_factory import RAGComponentFactory
+from EasyRAG.rag_service.rag_manager import RAGDocumentStatus, get_rag_manager
+from EasyRAG.common.utils import generate_uuid
+from EasyRAG.task_app.models import Task
 from .models import File, File2Document, KnowledgeBase, Document
 from .serializers import KnowledgeBaseSerializer, DocumentSerializer
 
 logger = logging.getLogger(__name__)
 
+class RAGAction(Enum):
+    START_PARSE = 'start_parse'
+    STOP_PARSE = 'stop_parse'
+    DELETE = 'delete'
+    RESUME_PARSE = 'resume_parse'
 
 class KnowledgeBaseViewModel:
     """知识库视图模型"""
@@ -231,10 +239,6 @@ class DocumentViewModel:
         if not knowledge_base_id:
             raise DRFValidationError('knowledge_base_id is required')
         
-        try:
-            uuid.UUID(knowledge_base_id)
-        except (ValueError, TypeError):
-            raise DRFValidationError('knowledge_base_id format invalid')
         
         kb = KnowledgeBase.objects.get(knowledge_base_id=knowledge_base_id)
         if not self.user.can_access_knowledge_base(kb):
@@ -247,10 +251,6 @@ class DocumentViewModel:
         if not document_id:
             raise DRFValidationError('document_id is required')
         
-        try:
-            uuid.UUID(document_id)
-        except (ValueError, TypeError):
-            raise DRFValidationError('document_id format invalid')
         
         try:
             document = Document.objects.get(document_id=document_id)
@@ -262,38 +262,39 @@ class DocumentViewModel:
     
     def perform_document_action(self, document_id: str, action: str) -> Optional[Document]:
         """执行文档操作"""
+        logger.info(f"In perform_document_action, document_id: {document_id}, action: {action}")
+        if not action:
+            raise DRFValidationError('action is required')
+        if not document_id:
+            raise DRFValidationError('document_id is required')
+       
+        if action not in [action.value for action in RAGAction]:
+            raise DRFValidationError(f'action: {action} is invalid')
+       
         document = self.get_document(document_id)
+        if document is None:
+            raise DRFValidationError('文档不存在')
+        if not self.user.can_access_knowledge_base(document.knowledge_base):
+            logger.error(f"User {self.user.id} does not have access to knowledge base {document.knowledge_base}")
+            raise DRFValidationError('您没有权限操作该文档')
         
+        rag_manager = get_rag_manager()
         try:
             with transaction.atomic():
-                if action == "start_parse":
-                    # TODO: 实现文档解析逻辑
-                    document.status = 'processing'
-                    document.progress = '0'
-                    document.progress_msg = '开始解析文档'
-                    document.progress_begin_at = timezone.now()
+                if action == RAGAction.START_PARSE.value:
+                    rag_manager.create_parse_document_task(document_id)
                     
-                elif action == "stop_parse":
-                    # TODO: 实现停止解析逻辑
-                    document.status = 'stopped'
-                    document.progress_msg = '解析已停止'
+                elif action == RAGAction.STOP_PARSE.value:
+                    rag_manager.stop_parse_document_task(document_id, self.user)
                     
-                elif action == "delete":
+                elif action == RAGAction.DELETE.value:
                     # 删除文档及其关联的File记录
-                    try:
-                        file2doc = File2Document.objects.get(document=document)
-                        file2doc.file.delete()  # 这会同时删除File记录和MinIO中的文件
-                        file2doc.delete()
-                    except File2Document.DoesNotExist:
-                        # 如果没有关联的File记录，直接删除Document
-                        pass
+                    if document.status in [RAGDocumentStatus.PROCESSING.value]:
+                        raise DRFValidationError(f"Document {document_id} status is {document.status}, cannot delete")
+                    # TODO: 删除文档及其关联的File记录
                     
-                    document.delete()
-                    return None  # 删除操作不返回文档对象
-                    
-                elif action == "refresh":
-                    # TODO: 实现刷新逻辑
-                    document.status = 'init'
+                elif action == RAGAction.RESUME_PARSE.value:
+                    document.status = RAGDocumentStatus.PROCESSING.value
                     document.progress = '0'
                     document.progress_msg = '文档已刷新'
                 else:
@@ -306,3 +307,97 @@ class DocumentViewModel:
         except Exception as e:
             logger.error(f"Document action failed: {e}")
             raise DRFValidationError(f'操作失败: {str(e)}') 
+   
+        
+    
+    def _delete_document(self, document: Document) -> Document:
+        """删除文档"""
+        logger.info(f"In _delete_document, document: {document}")
+        return document
+    
+    def _refresh_document(self, document: Document) -> Document:
+        """刷新文档"""
+        logger.info(f"In _refresh_document, document: {document}")
+        return document
+
+    def start_parser_document(self, document_id: str, resume_from: Optional[str] = None) -> Dict[str, Any]:
+        """
+        启动文档解析
+        
+        Args:
+            document_id: 文档ID
+            resume_from: 断点续传的起始步骤
+            
+        Returns:
+            解析启动结果
+        """
+        logger.info(f"In start_parser_document, document_id: {document_id}, resume_from: {resume_from}")
+        
+        # 验证文档存在和权限
+        document = self.get_document(document_id)
+        
+        # 使用RAGManager启动解析
+        rag_manager = get_rag_manager()
+        result = rag_manager.start_document_parse(document_id, self.user, resume_from)
+        
+        if result['success']:
+            return {
+                'message': result['message'],
+                'document_id': result['document_id'],
+                'task_id': result.get('task_id'),
+                'status': result['status']
+            }
+        else:
+            raise DRFValidationError(result['message'])
+    
+    def stop_parser_document(self, document_id: str) -> Dict[str, Any]:
+        """
+        停止文档解析
+        
+        Args:
+            document_id: 文档ID
+            
+        Returns:
+            停止结果
+        """
+        logger.info(f"In stop_parser_document, document_id: {document_id}")
+        
+        # 验证文档存在和权限
+        document = self.get_document(document_id)
+        
+        # 使用RAGManager停止解析
+        rag_manager = get_rag_manager()
+        result = rag_manager.stop_document_parse(document_id, self.user)
+        
+        if result['success']:
+            return {
+                'message': result['message'],
+                'document_id': result['document_id'],
+                'status': result['status']
+            }
+        else:
+            raise DRFValidationError(result['message'])
+    
+    def get_parser_status(self, document_id: str) -> Dict[str, Any]:
+        """
+        获取文档解析状态
+        
+        Args:
+            document_id: 文档ID
+            
+        Returns:
+            解析状态信息
+        """
+        logger.info(f"In get_parser_status, document_id: {document_id}")
+        
+        # 验证文档存在和权限
+        document = self.get_document(document_id)
+        
+        # 使用RAGManager获取状态
+        rag_manager = get_rag_manager()
+        result = rag_manager.get_parse_status(document_id, self.user)
+        
+        if result['success']:
+            return result
+        else:
+            raise DRFValidationError(result['message'])

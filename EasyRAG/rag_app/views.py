@@ -344,7 +344,7 @@ class DocumentActionView(APIView):
     """
     
     @swagger_auto_schema(
-        operation_description="对文档执行操作（开始解析、停止解析、删除、刷新）",
+        operation_description="对文档执行操作（开始解析、停止解析、删除、继续解析）",
         operation_summary="文档操作",
         manual_parameters=[
             openapi.Parameter(
@@ -352,7 +352,6 @@ class DocumentActionView(APIView):
                 openapi.IN_PATH,
                 description="文档ID",
                 type=openapi.TYPE_STRING,
-                format=openapi.FORMAT_UUID,
                 required=True
             ),
         ],
@@ -362,8 +361,9 @@ class DocumentActionView(APIView):
                 'action': openapi.Schema(
                     type=openapi.TYPE_STRING,
                     description="操作类型",
-                    enum=['start_parse', 'stop_parse', 'delete', 'refresh']
-                ),
+                    enum=['start_parse', 'stop_parse', 'delete', 'resume_parse']
+                )
+                
             },
             required=['action']
         ),
@@ -403,3 +403,6 @@ class DocumentActionView(APIView):
                 
         except Exception as e:
             return Response({'error': str(e)}, status=400)
+
+
+

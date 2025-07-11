@@ -1,5 +1,7 @@
 {
     "cSpell.words": [
         "datrie"
-    ]
+    ],
+    "editor.fontSize": 22,
+    "editor.suggestFontSize": 22
 }

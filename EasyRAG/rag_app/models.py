@@ -55,6 +55,7 @@ class Document(models.Model):
     parser_id = models.CharField(max_length=20, null=False)
     source_type = models.CharField(max_length=128, null=False)
     run_id = models.CharField(max_length=50, null=True)
+    #INIT, PARSING, STOPPED, COMPLETED, FAILED
     status = models.CharField(max_length=50, null=True)
     metadata = models.JSONField(null=True)
     progress = models.CharField(max_length=50, null=False)
